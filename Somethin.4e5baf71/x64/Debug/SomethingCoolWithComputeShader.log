@@ -1,0 +1,5 @@
+﻿  main.cpp
+C:\Users\Александр\source\repos\SomethingCoolWithComputeShader\main.cpp(1059,1): warning C4715: 'TriangleApp::findSupportedFormat': not all control paths return a value
+  SomethingCoolWithComputeShader.vcxproj -> C:\Users\Александр\source\repos\SomethingCoolWithComputeShader\x64\Debug\SomethingCoolWithComputeShader.exe
+  "pwsh.exe" не является внутренней или внешней
+  командой, исполняемой программой или пакетным файлом.

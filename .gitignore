@@ -1,0 +1,13 @@
+#ignore
+.vs/
+*.suo
+*.aps
+*.ncb
+*.opendb
+*.db
+*.pdb
+*.enc
+*.ini
+*.ilk
+*.htm
+*.idb

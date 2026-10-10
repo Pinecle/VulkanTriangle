@@ -1,0 +1,2 @@
+C:\Users\Александр\source\repos\SomethingCoolWithComputeShader\x64\Debug\glfw3.dll
+C:\Users\Александр\source\repos\SomethingCoolWithComputeShader\Somethin.4e5baf71\x64\Debug\Somethin.593EAF55.Up2Date
