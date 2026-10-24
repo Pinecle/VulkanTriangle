@@ -1,5 +1,11 @@
 ﻿  main.cpp
-C:\Users\Александр\source\repos\SomethingCoolWithComputeShader\main.cpp(1059,1): warning C4715: 'TriangleApp::findSupportedFormat': not all control paths return a value
+C:\Users\Александр\source\repos\SomethingCoolWithComputeShader\main.cpp(207,17): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
+C:\Users\Александр\source\repos\SomethingCoolWithComputeShader\main.cpp(208,17): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
+C:\Users\Александр\source\repos\SomethingCoolWithComputeShader\main.cpp(211,17): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+C:\Users\Александр\source\repos\SomethingCoolWithComputeShader\main.cpp(212,17): warning C4244: 'initializing': conversion from 'double' to 'float', possible loss of data
+C:\Users\Александр\source\repos\SomethingCoolWithComputeShader\main.cpp(213,16): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
+C:\Users\Александр\source\repos\SomethingCoolWithComputeShader\main.cpp(214,16): warning C4244: '=': conversion from 'double' to 'float', possible loss of data
+C:\Users\Александр\source\repos\SomethingCoolWithComputeShader\main.cpp(1238,1): warning C4715: 'TriangleApp::findSupportedFormat': not all control paths return a value
   SomethingCoolWithComputeShader.vcxproj -> C:\Users\Александр\source\repos\SomethingCoolWithComputeShader\x64\Debug\SomethingCoolWithComputeShader.exe
   "pwsh.exe" не является внутренней или внешней
   командой, исполняемой программой или пакетным файлом.

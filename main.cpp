@@ -1,7 +1,9 @@
 #include <iostream>
 #include <fstream>
 #include <chrono>
+#include <random>
 
+#define VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS
 #define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
 #if defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES)
 #	include <vulkan/vulkan_raii.hpp>
@@ -17,10 +19,12 @@ import vulkan_hpp;
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+typedef std::uint32_t uint32;
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
-constexpr int      MAX_FRAMES_IN_FLIGHT = 2;
+constexpr uint32   MAX_FRAMES_IN_FLIGHT = 2;
+constexpr uint32   PARTICLE_COUNT = 8192;
 
 const std::vector<const char*> validationLayers = {
 	"VK_LAYER_KHRONOS_validation"
@@ -32,48 +36,53 @@ constexpr bool enableValidationLayers = false;
 constexpr bool enableValidationLayers = true;
 #endif
 
-typedef std::uint32_t uint32;
-
 struct Vertex {
 
-	glm::vec3 pos;
-	glm::vec3 color;
-	glm::vec2 texCoord;
+	glm::vec2 pos;
 
 	static vk::VertexInputBindingDescription getBindingDecription() {
 
 		return { .binding = 0, .stride = sizeof(Vertex), .inputRate = vk::VertexInputRate::eVertex };
 	}
 
-	static std::array<vk::VertexInputAttributeDescription, 3> getAttributeDescriptions(){
+	static std::array<vk::VertexInputAttributeDescription, 1> getAttributeDescriptions(){
 
-		return { {{.location = 0, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, pos)},
-				 {.location = 1, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, color)},
-				 {.location = 2, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof(Vertex, texCoord)}} };
+		return { {{.location = 0, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof(Vertex, pos)}} };
 	}
 };
 
-struct UniformBufferObject
+struct Camera
 {
-	glm::mat4 model;
+	glm::mat4 inverseViewProj;
+	glm::vec3 cameraPos;
+	/*glm::mat4 model;
 	glm::mat4 view;
-	glm::mat4 proj;
+	glm::mat4 proj;*/
+};
+
+struct Grid {
+	float cellSize;
+	float fadeStart;
+	float fadeEnd;
+	glm::vec3 colorThin;
+	glm::vec3 colorThick;
+	glm::vec3 colorAxisX;
+	glm::vec3 colorAxisY;
+};
+
+struct Particle {
+	alignas(8)glm::vec2 position;
+	alignas(8)glm::vec2 velocity;
+	alignas(16)glm::vec4 color;
 };
 
 const std::vector<Vertex> vertices = {
-	{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-	{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-	{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-	{{-0.5f, 0.5f, 0.0f}, {0.5f, 0.5f, 0.0f}, {1.0f, 1.0f}},
-
-	{{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-	{{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-	{{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-	{{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}} };
+	{{-1.0f, -1.0f} },
+	{{3.0f, -1.0f} },
+	{{-1.0f, 3.0f} } };
 
 const std::vector<uint32> indices = {
-	0,1,2,2,3,0,
-	4,5,6,6,7,4
+	0,1,2
 };
 
 class TriangleApp {
@@ -118,9 +127,16 @@ private:
 	vk::raii::Buffer       indexBuffer        = nullptr;
 	vk::raii::DeviceMemory indexBufferMemory  = nullptr;
 
+	std::vector<vk::raii::Buffer>       shaderStorageBuffers{};
+	std::vector<vk::raii::DeviceMemory> shaderStorageBuffersMemory{};
+
 	std::vector<vk::raii::Buffer>       uniformBuffers;
 	std::vector<vk::raii::DeviceMemory> uniformBuffersMemory;
 	std::vector<void*>                  uniformBuffersMapped;
+
+	size_t camStride;
+	//for future
+	size_t gridStride;
 
 	vk::raii::DescriptorPool             descriptorPool = nullptr;
 	std::vector<vk::raii::DescriptorSet> descriptorSets;
@@ -135,6 +151,23 @@ private:
 	uint32                           mipLevels = 1;
 
 	bool framebufferResized = false;
+	bool keys[1024];
+
+	//Camera
+	
+	float yaw = 0.0f;
+	float pitch = 0.0f;
+	float lastX = 400, lastY = 300;
+	bool firstMouseMove = true;
+
+	glm::vec3 cameraPos{ 0.0f, 0.0f, 1.0f };
+	glm::vec3 cameraFront{0.0f, 0.0f, 0.0f};
+
+	glm::vec3 cameraUp{ 0.0f, 0.0f, 1.0f };
+	float cameraSpeed = 1.5f;
+
+	std::chrono::steady_clock::time_point lastTime = std::chrono::steady_clock::now();
+	float deltaTime = 0.0f;
 
 	std::vector<const char*> requiredDeviceExtension = {
 		vk::KHRSwapchainExtensionName,
@@ -143,13 +176,57 @@ private:
 
 	void initWindow() {
 		glfwInit();
-
+		
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 		glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
 		window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
 		glfwSetWindowUserPointer(window, this);
 		glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+		glfwSetKeyCallback(window, keyCallback);
+
+		glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+		glfwSetCursorPosCallback(window, cursorCallback);
+	}
+	
+	static void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mode)
+	{
+		auto app = reinterpret_cast<TriangleApp*>(glfwGetWindowUserPointer(window));
+		if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+			glfwSetWindowShouldClose(window, GL_TRUE);
+		if (action == GLFW_PRESS)
+			app->keys[key] = true;
+		else if (action == GLFW_RELEASE)
+			app->keys[key] = false;
+	}
+
+	static void cursorCallback(GLFWwindow* window, double xpos, double ypos) {
+		auto app = reinterpret_cast<TriangleApp*>(glfwGetWindowUserPointer(window));
+
+		if (app->firstMouseMove) {
+			app->lastX = xpos;
+			app->lastY = ypos;
+			app->firstMouseMove = false;
+		}
+		float xOffset = app->lastX - xpos;
+		float yOffset = app->lastY - ypos;
+		app->lastX = xpos;
+		app->lastY = ypos;
+
+		const float sensitivity = 0.1f;
+		xOffset *= sensitivity;
+		yOffset *= sensitivity;
+
+		app->yaw   += xOffset;
+		app->pitch += yOffset;
+
+		if (app->pitch > 89.0f)
+			app->pitch = 89.0f;
+		if (app->pitch < -89.0f)
+			app->pitch = -89.0f;
+
+		glm::vec3 direction{ cos(glm::radians(app->yaw)) * cos(glm::radians(app->pitch)), sin(glm::radians(app->yaw)) * cos(glm::radians(app->pitch)), sin(glm::radians(app->pitch)) };
+		app->cameraFront = (glm::normalize(direction));
 	}
 
 	static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
@@ -171,6 +248,7 @@ private:
 		createColorResources();
 		createDepthResources();
 		createVertexBuffer();
+		//createShaderStorageBuffers();
 		createIndexBuffer();
 		createUniformBuffers();
 		createDescriptorPool();
@@ -179,10 +257,27 @@ private:
 		createSyncObjects();
 	}
 
+	void updateCameraPos() {
+		if (keys[GLFW_KEY_W])
+			cameraPos += cameraSpeed * deltaTime * cameraFront;
+		if (keys[GLFW_KEY_S])
+			cameraPos -= cameraSpeed * deltaTime * cameraFront;
+		if (keys[GLFW_KEY_A])
+			cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed * deltaTime;
+		if (keys[GLFW_KEY_D])
+			cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed * deltaTime;
+	}
+
 	void mainLoop() {
 		while (!glfwWindowShouldClose(window))
 		{
 			glfwPollEvents();
+
+			auto currentTime = std::chrono::high_resolution_clock::now();
+			deltaTime = std::chrono::duration<float>(currentTime - lastTime).count();
+			lastTime = currentTime;
+			deltaTime = std::min(deltaTime, 0.1f);
+			
 			drawFrame();
 		}
 
@@ -455,10 +550,11 @@ private:
 	}
 
 	void createDescriptorSetLayout() {
-		std::array<vk::DescriptorSetLayoutBinding, 1> bindings{
-			{{.binding = 0, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex}} };
+		std::array<vk::DescriptorSetLayoutBinding, 2> bindings{
+			{{.binding = 0, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment},
+			{ .binding = 1, .descriptorType = vk::DescriptorType::eUniformBuffer, .descriptorCount = 1, .stageFlags = vk::ShaderStageFlagBits::eFragment}} };
 
-		vk::DescriptorSetLayoutCreateInfo layoutInfo{ .bindingCount = static_cast<uint32_t>(bindings.size()), .pBindings = bindings.data() };
+		vk::DescriptorSetLayoutCreateInfo layoutInfo{ .bindingCount = static_cast<uint32>(bindings.size()), .pBindings = bindings.data() };
 		descriptorSetLayout = vk::raii::DescriptorSetLayout(device, layoutInfo);
 	}
 
@@ -468,8 +564,8 @@ private:
 
 		vk::PipelineShaderStageCreateInfo vertShaderStageInfo{ .stage = vk::ShaderStageFlagBits::eVertex, .module = shaderModule, .pName = "vertMain" };
 		vk::PipelineShaderStageCreateInfo fragShaderStageInfo{ .stage = vk::ShaderStageFlagBits::eFragment, .module = shaderModule, .pName = "fragMain" };
-		vk::PipelineShaderStageCreateInfo computeShaderStageInfo{ .stage = vk::ShaderStageFlagBits::eCompute, .module = shaderModule, .pName = "computeMain" };
-		vk::PipelineShaderStageCreateInfo shaderStages[]   = { vertShaderStageInfo, fragShaderStageInfo, computeShaderStageInfo };
+		//vk::PipelineShaderStageCreateInfo computeShaderStageInfo{ .stage = vk::ShaderStageFlagBits::eCompute, .module = shaderModule, .pName = "computeMain" };
+		vk::PipelineShaderStageCreateInfo shaderStages[]   = { vertShaderStageInfo, fragShaderStageInfo, /*computeShaderStageInfo*/};
 
 		auto bindingDescription   = Vertex::getBindingDecription();
 		auto attributeDescription = Vertex::getAttributeDescriptions();
@@ -673,6 +769,58 @@ private:
 		copyBuffer(stagingBuffer, vertexBuffer, bufferSize);
 	}
 
+	void createShaderStorageBuffers() {
+
+		//initialize particles
+		std::default_random_engine rndEngine(static_cast<unsigned>(time(nullptr)));
+		std::uniform_real_distribution rndDist(0.0f, 1.0f);
+
+		//initialize particles positions on a circle
+		std::vector<Particle> particles(PARTICLE_COUNT);
+
+		for (auto& particle : particles) {
+
+			float r = 0.25f * sqrtf(rndDist(rndEngine));
+			float theta = rndDist(rndEngine) * 2.0f * 3.14159265358979323846f;
+			float x = r * cosf(theta) * HEIGHT / WIDTH;
+			float y = r * sinf(theta);
+			particle.position = glm::vec2(x, y);
+			particle.velocity = glm::normalize(glm::vec2(x, y)) * 0.00025f;
+			particle.color = glm::vec4(rndDist(rndEngine), rndDist(rndEngine), rndDist(rndEngine), 1.0f);
+		}
+		vk::DeviceSize bufferSize = sizeof(Particle) * PARTICLE_COUNT;
+		vk::raii::Buffer stagingBuffer({});
+		vk::raii::DeviceMemory stagingBufferMemory({});
+
+		createBuffer(
+			bufferSize,
+			vk::BufferUsageFlagBits::eTransferSrc,
+			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+			stagingBuffer, stagingBufferMemory);
+
+		void* data = stagingBufferMemory.mapMemory(0, bufferSize);
+		memcpy(data, particles.data(), bufferSize);
+		stagingBufferMemory.unmapMemory();
+
+		shaderStorageBuffers.clear();
+		shaderStorageBuffersMemory.clear();
+
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+		{
+			vk::raii::Buffer shaderStorageBufferTemp({});
+			vk::raii::DeviceMemory shaderStorageBufferTempMemory({});
+			createBuffer(
+				bufferSize,
+				vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+				vk::MemoryPropertyFlagBits::eDeviceLocal,
+				shaderStorageBufferTemp, shaderStorageBufferTempMemory);
+
+			copyBuffer(stagingBuffer, shaderStorageBufferTemp, bufferSize);
+			shaderStorageBuffers.emplace_back(std::move(shaderStorageBufferTemp));
+			shaderStorageBuffersMemory.emplace_back(std::move(shaderStorageBufferTempMemory));
+		}
+	}
+
 	void createBuffer(
 		vk::DeviceSize size,
 		vk::BufferUsageFlags usage,
@@ -727,11 +875,17 @@ private:
 
 	void createUniformBuffers() {
 
+		const auto properties = physicalDevice.getProperties2();
+		const vk::DeviceSize align = properties.properties.limits.minUniformBufferOffsetAlignment;
+		camStride  = (sizeof(Camera) + align - 1) & ~(align - 1);
+		gridStride = (sizeof(Grid) + align - 1) & ~(align - 1);
+
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
-			vk::DeviceSize bufferSize = sizeof(UniformBufferObject);
+			vk::DeviceSize bufferSize = camStride + sizeof(Grid);
 			vk::raii::Buffer buffer({});
 			vk::raii::DeviceMemory bufferMem({});
+
 			createBuffer(
 				bufferSize,
 				vk::BufferUsageFlagBits::eUniformBuffer,
@@ -746,7 +900,8 @@ private:
 	void createDescriptorPool() {
 
 		std::array<vk::DescriptorPoolSize, 1> poolSize{
-			{{.type = vk::DescriptorType::eUniformBuffer, .descriptorCount = MAX_FRAMES_IN_FLIGHT}} };
+			//2 * MAX_FRAMES_IN_FLIGHT because of 2 uniform buffers: cam and grid
+			{{.type = vk::DescriptorType::eUniformBuffer, .descriptorCount = 2 * MAX_FRAMES_IN_FLIGHT}} };
 
 		vk::DescriptorPoolCreateInfo          poolInfo{ 
 			.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
@@ -771,15 +926,24 @@ private:
 
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
-			vk::DescriptorBufferInfo bufferInfo{ .buffer = uniformBuffers[i], .offset = 0, .range = sizeof(UniformBufferObject) };
+			vk::DescriptorBufferInfo cameraBufferInfo{ .buffer = uniformBuffers[i], .offset = 0, .range = sizeof(Camera) };
+			vk::DescriptorBufferInfo gridBufferInfo  { .buffer = uniformBuffers[i], .offset = camStride, .range = sizeof(Grid)};
 
-			std::array<vk::WriteDescriptorSet, 1> descriptorWrites{
+			std::array<vk::WriteDescriptorSet, 2> descriptorWrites{
 				{{  .dstSet = descriptorSets[i],
 					.dstBinding = 0,
 					.dstArrayElement = 0,
 					.descriptorCount = 1,
 					.descriptorType = vk::DescriptorType::eUniformBuffer,
-					.pBufferInfo = &bufferInfo}}
+					.pBufferInfo = &cameraBufferInfo},
+				{
+					.dstSet = descriptorSets[i],
+					.dstBinding = 1,
+					.dstArrayElement =0,
+					.descriptorCount = 1,
+					.descriptorType = vk::DescriptorType::eUniformBuffer,
+					.pBufferInfo = &gridBufferInfo
+				}}
 			};
 			device.updateDescriptorSets(descriptorWrites, {});
 		}
@@ -933,18 +1097,33 @@ private:
 
 	void updateUniformBuffer(uint32_t currentImage)
 	{
-		static auto startTime = std::chrono::high_resolution_clock::now();
+		/*static auto startTime = std::chrono::high_resolution_clock::now();
 
 		auto  currentTime = std::chrono::high_resolution_clock::now();
-		float time = std::chrono::duration<float>(currentTime - startTime).count();
+		float time = std::chrono::duration<float>(currentTime - startTime).count();*/
 
-		UniformBufferObject ubo{};
-		ubo.model = rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		ubo.view = lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-		ubo.proj =
-			glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 10.0f);
+		updateCameraPos();
+		Camera cam{};
+		glm::mat4 view = lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+		glm::mat4 proj =
+			glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 200.0f);
 
-		memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+		cam.inverseViewProj = glm::inverse(proj * view);
+		cam.cameraPos = cameraPos;
+		
+		memcpy(uniformBuffersMapped[currentImage], &cam, sizeof(cam));
+
+		Grid grid{
+		 .cellSize   = 0.1f,
+		 .fadeStart  = 20.0f,
+		 .fadeEnd    = 60.0f,
+		 .colorThin  = glm::vec3(1.0f),
+		 .colorThick = glm::vec3(1.0f, 1.0f, 1.0f),
+		 .colorAxisX = glm::vec3(1,1,1),
+		 .colorAxisY = glm::vec3(1,1,1)
+		};
+		memcpy(static_cast<char*>(uniformBuffersMapped[currentImage]) + camStride, &grid, sizeof(grid));
+		
 	}
 
 	void drawFrame() {
